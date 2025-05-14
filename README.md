@@ -93,5 +93,3 @@ This project is a **Proof of Concept (PoC)** showcasing a weather chatbot built 
 
 ---
 
-## Author
-👨💻 **Ashner Gerald Novilla**  
