@@ -1,79 +1,96 @@
 import streamlit as st
+from time import sleep
 import requests
+import nltk
+nltk.download('stopwords')
+from nltk.corpus import stopwords
+import string
 
-# API Keys (store in Streamlit secrets)
-HF_API_KEY = st.secrets["HF_API_KEY"]
-WEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
+st.header("**Hugging Face Weather Chatbot Deployment** 🤖")
+st.caption("This is a PoC using OpenWeatherMap and Hugging Face API.")
+st.caption("Srujan B J")
 
-st.header("🌦️ Weather Chatbot with Hugging Face LLM")
-st.caption("Now with conversational AI! (Powered by Hugging Face API)")
+# Set your API keys
+weather_api_key = st.secrets["OPENWEATHER_API_KEY"]
+huggingface_api_key = st.secrets["HUGGINGFACE_API_KEY"]
 
-# Hugging Face Inference API Helper
-def query_huggingface(prompt, max_length=100):
-    API_URL = "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
-    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
-    payload = {
-        "inputs": prompt,
-        "parameters": {"max_length": max_length}
+# Hugging Face Model
+HF_MODEL_URL = "https://api-inference.huggingface.co/models/gpt2"
+
+# Function to extract potential location names from the input
+def extract_locations(user_input):
+    stop_words = set(stopwords.words('english'))
+    cleaned_input = ' '.join(word for word in user_input.split() if word.lower() not in stop_words)
+    return [word.strip(string.punctuation) for word in cleaned_input.split() if word]
+
+# Function to query Hugging Face model for location extraction
+def get_locations_from_hf(user_input):
+    headers = {
+        "Authorization": f"Bearer {huggingface_api_key}",
+        "Content-Type": "application/json"
     }
-    response = requests.post(API_URL, headers=headers, json=payload)
-    return response.json()
-
-def get_weather(location):
-    """Fetch weather data from OpenWeatherMap."""
+    data = {
+        "inputs": f"Extract all location names from this text: '{user_input}'"
+    }
+    response = requests.post(HF_MODEL_URL, headers=headers, json=data)
     try:
-        url = f"https://api.openweathermap.org/data/2.5/weather?q={location}&appid={WEATHER_API_KEY}&units=metric"
-        response = requests.get(url).json()
-        if response.get("cod") != 200:
-            return None
-        return {
-            "city": response["name"],
-            "temp": response["main"]["temp"],
-            "description": response["weather"][0]["description"].capitalize(),
-            "humidity": response["main"]["humidity"]
-        }
+        locations = response.json()[0]["generated_text"].split(",")
+        return [loc.strip() for loc in locations if loc.strip()]
     except Exception as e:
-        st.error(f"Weather API Error: {str(e)}")
-        return None
+        return []
 
-def generate_response(user_input):
-    """Generate conversational response using Hugging Face API."""
-    # Step 1: Extract location
-    location_prompt = f"""Extract ONLY the city name from this query: '{user_input}'"""
-    location_response = query_huggingface(location_prompt, max_length=20)
-    location = location_response[0]["generated_text"].strip()
+# Function to fetch weather data from OpenWeatherMap API
+def get_openweather_data(location):
+    try:
+        url = f"https://api.openweathermap.org/data/2.5/weather?q={location}&appid={weather_api_key}&units=metric"
+        response = requests.get(url)
+        response.raise_for_status()
+        data = response.json()
+        city = data["name"]
+        temp = data["main"]["temp"]
+        description = data["weather"][0]["description"].capitalize()
+        humidity = data["main"]["humidity"]
+        wind_speed = data["wind"]["speed"]
+        return f"The weather in {city} is {description} with {temp}°C, {humidity}% humidity, and wind speed of {wind_speed} m/s."
+    except Exception as e:
+        return f"Error fetching weather data for {location}: {str(e)}"
 
-    # Step 2: Get weather data
-    weather = get_weather(location)
-    if not weather:
-        return f"Sorry, I couldn't get weather data for {location}."
+# Chatbot logic
+def chatbot(user_input):
+    # Extract locations using Hugging Face
+    locations = get_locations_from_hf(user_input)
     
-    # Step 3: Generate friendly response
-    response_prompt = f"""The user asked: '{user_input}'. 
-    Weather data: {weather}. 
-    Reply conversationally in 1-2 sentences:"""
-    bot_response = query_huggingface(response_prompt)
+    # Fallback to simple keyword extraction if HF model fails
+    if not locations:
+        locations = extract_locations(user_input)
     
-    # Clean and return the response
-    return bot_response[0]["generated_text"].strip()
-
-# Chat UI
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-# Display previous chat messages
-for msg in st.session_state.messages:
-    st.chat_message(msg["role"]).write(msg["content"])
-
-# Handle user input and chatbot responses
-if prompt := st.chat_input("Ask about weather (e.g., 'Do I need an umbrella in Tokyo?')"):
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
+    if not locations:
+        return "Please include a location for weather updates."
     
-    with st.spinner("Checking weather..."):
-        try:
-            bot_response = generate_response(prompt)
-            st.session_state.messages.append({"role": "assistant", "content": bot_response})
-            st.chat_message("assistant").write(bot_response)
-        except Exception as e:
-            st.error(f"Error: {str(e)}")
+    responses = [get_openweather_data(loc) for loc in locations]
+    return "\n".join(responses)
+
+# Initialize conversation history
+if "history" not in st.session_state:
+    st.session_state["history"] = []
+
+# Chat input and processing
+prompt = st.chat_input("Ask the bot something (type 'quit' to stop)")
+if prompt:
+    if prompt.lower() == "quit":
+        st.write("**Chatbot session ended. Refresh the page to start a new conversation.**")
+    else:
+        st.session_state["history"].append({"role": "user", "message": prompt})
+        bot_response = chatbot(prompt)
+        st.session_state["history"].append({"role": "bot", "message": bot_response})
+
+# Display conversation history
+for entry in st.session_state["history"]:
+    if entry["role"] == "user":
+        st.chat_message("user").write(entry["message"])
+    elif entry["role"] == "bot":
+        placeholder = st.chat_message("assistant").empty()
+        streamed_text = ""
+        for word in entry["message"].split():
+            streamed_text += word + " "
+            placeholder.write(f"**Bot:** {streamed_text}")
