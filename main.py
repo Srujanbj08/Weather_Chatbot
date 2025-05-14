@@ -1,11 +1,3 @@
-# -*- coding: utf-8 -*-
-"""
-Created on Mon Jan  6 15:04:01 2025
-
-@author: ASHNER_NOVILLA
-"""
-
-
 import streamlit as st
 from time import sleep
 import os
