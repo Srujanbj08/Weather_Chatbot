@@ -16,7 +16,7 @@ import string
 
 st.header("**OpenAI Weather Chatbot Deployment** 🤖")
 st.caption("This is a LLM PoC using OpenAI and OpenWeather Inference.")
-st.caption("Author: Ashner Novilla :sunglasses:")
+st.caption("Srujan B J")
 
 # Set your OpenAI API key
 # Retrieve the API key from Streamlit Secrets
