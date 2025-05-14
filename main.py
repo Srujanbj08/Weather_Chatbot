@@ -1,24 +1,23 @@
 import streamlit as st
 import requests
-from transformers import pipeline
 
-# Hugging Face Model (using free API)
-HF_API_KEY = st.secrets["HF_API_KEY"]  # Get your key: https://huggingface.co/settings/tokens
+# API Keys (store in Streamlit secrets)
+HF_API_KEY = st.secrets["HF_API_KEY"]
 WEATHER_API_KEY = st.secrets["OPENWEATHER_API_KEY"]
 
 st.header("🌦️ Weather Chatbot with Hugging Face LLM")
-st.caption("Now with conversational AI! (Powered by Hugging Face)")
+st.caption("Now with conversational AI! (Powered by Hugging Face API)")
 
-# Initialize Hugging Face pipeline (for local LLM) or use API
-@st.cache_resource
-def load_llm():
-    return pipeline(
-        "text-generation",
-        model="HuggingFaceH4/zephyr-7b-beta",  # Lightweight model
-        api_key=HF_API_KEY
-    )
-
-llm = load_llm()
+# Hugging Face Inference API Helper
+def query_huggingface(prompt, max_length=100):
+    API_URL = "https://api-inference.huggingface.co/models/HuggingFaceH4/zephyr-7b-beta"
+    headers = {"Authorization": f"Bearer {HF_API_KEY}"}
+    payload = {
+        "inputs": prompt,
+        "parameters": {"max_length": max_length}
+    }
+    response = requests.post(API_URL, headers=headers, json=payload)
+    return response.json()
 
 def get_weather(location):
     """Fetch weather data from OpenWeatherMap."""
@@ -28,33 +27,30 @@ def get_weather(location):
         return {
             "city": response["name"],
             "temp": response["main"]["temp"],
-            "description": response["weather"][0]["description"],
+            "description": response["weather"][0]["description"].capitalize(),
             "humidity": response["main"]["humidity"]
         }
     except:
         return None
 
 def generate_response(user_input):
-    """Use LLM to generate a conversational response with weather data."""
-    # Step 1: Extract location using LLM
-    prompt = f"""
-    Extract the location from this user query. Return ONLY the city name:
-    User: '{user_input}'
-    Location: """
-    location = llm(prompt, max_length=20, truncation=True)[0]["generated_text"].strip()
+    """Generate conversational response using Hugging Face API."""
+    # Step 1: Extract location
+    location_prompt = f"""Extract ONLY the city name from this query: '{user_input}'"""
+    location_response = query_huggingface(location_prompt, max_length=20)
+    location = location_response[0]["generated_text"].strip()
     
     # Step 2: Get weather data
     weather = get_weather(location)
     if not weather:
-        return "Sorry, I couldn't fetch weather data for that location."
+        return f"Sorry, I couldn't get weather data for {location}."
     
-    # Step 3: Generate natural language response
-    llm_prompt = f"""
-    The user asked: '{user_input}'
-    Weather data: {weather}
-    Craft a friendly, concise response (1-2 sentences): """
-    response = llm(llm_prompt, max_length=100)[0]["generated_text"]
-    return response.split(":")[-1].strip()  # Clean output
+    # Step 3: Generate friendly response
+    response_prompt = f"""The user asked: '{user_input}'. 
+    Weather data: {weather}. 
+    Reply conversationally in 1-2 sentences:"""
+    bot_response = query_huggingface(response_prompt)
+    return bot_response[0]["generated_text"].split(":")[-1].strip()
 
 # Chat UI
 if "messages" not in st.session_state:
@@ -63,11 +59,14 @@ if "messages" not in st.session_state:
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
-if prompt := st.chat_input("Ask about the weather (e.g., 'Should I wear a jacket in Paris?')"):
+if prompt := st.chat_input("Ask about weather (e.g., 'Do I need an umbrella in Tokyo?'"):
     st.session_state.messages.append({"role": "user", "content": prompt})
     st.chat_message("user").write(prompt)
     
-    with st.spinner("Thinking..."):
-        bot_response = generate_response(prompt)
-        st.session_state.messages.append({"role": "assistant", "content": bot_response})
-        st.chat_message("assistant").write(bot_response)
+    with st.spinner("Checking weather..."):
+        try:
+            bot_response = generate_response(prompt)
+            st.session_state.messages.append({"role": "assistant", "content": bot_response})
+            st.chat_message("assistant").write(bot_response)
+        except Exception as e:
+            st.error(f"Error: {str(e)}")
